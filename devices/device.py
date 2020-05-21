@@ -10,27 +10,21 @@ import os, time, datetime, json, threading, multiprocessing, copy
 import subprocess as sp
 try:
     from .squawk import say
-    from .control import StateMachine
+    from .control import ESMachine
     from .eventful import PriorityEvent, PriorityEventQueue
 except:
     from squawk import say
-    from control import StateMachine
+    from control import ESMachine
     from eventful import PriorityEvent, PriorityEventQueue
 
 
 ## global declarations or something.
-# event stuff.
-NO_EVENT, INIT_EVENT, EXIT_EVENT, \
-        COMPLETE_EVENT, CONNECTED_EVENT, DISCONNECTED_EVENT, \
-        REQUEST_CONNECT_EVENT, REQUEST_DISCONNECT_EVENT, \
-        TIMEOUT_CONNECTING_EVENT, \
-        TIMEOUT_DISCONNECTING_EVENT = [str(i) for i in range(0,10)]
+# time/r stuff.
+_EPOCH = datetime.datetime(1970,1,1)
 # priorities.
 _MIN_PRIORITY = 0
 _MAX_PRIORITY = _MIN_PRIORITY + 5
 _DEFAULT_PRIORITY = _MIN_PRIORITY + 1
-# time/r stuff.
-_EPOCH = datetime.datetime(1970,1,1)
 
 
 ## Local functions.
@@ -51,66 +45,7 @@ def _get_time_now(time_format='utc'):
         return _get_time_now(time_format='epoch')
 
 
-## timer class.
-class Timer(object):
-    """
-    Vanilla timer class.
-    """
-    # TODO : get rid of timeout_event; add to dict of Timers.
-    def __init__(self, label, duration, timeout_event='0'):
-        self.label = label
-        self.duration = duration
-        self.timeout_event = timeout_event
-        self._active_threads = []
-        self._start_time = None
-        self._end_time = None
-        self.active = False
-        self.expired = False
-
-    def __str__(self):
-        return '-'.join(['timer',str(self.label)])
-
-    def _start_thread(self, target, name, args=(), kwargs={}):
-        """
-        Get them wheels turning.
-        :in: target (*funk)
-        :in: name (str) NOTE : set as daemon process with the word 'daemon' in here.
-        :in: args (*)
-        :in: kwargs {*}
-        :out: thread (Thread)
-        """
-        thread = threading.Thread(target=target, name=name, args=args, kwargs=kwargs)
-        thread.daemon = True
-        thread.start()
-        if thread.isAlive():
-            self._active_threads.append(thread)
-            return thread
-        return None
-
-    def start(self):
-        self._start_time = float(_get_time_now('epoch'))
-        self._start_thread(self._countdown, 'timer')
-        self.active = True
-
-    def pause(self):
-        self.active = False
-
-    def reset(self):
-        self.__init__(self.label, self.duration)
-
-    def _countdown(self):
-        while 1<2:
-            if self.active:
-                _time_elapsed = float(_get_time_now('epoch')) - self._start_time
-                if _time_elapsed >= self.duration:
-                    self.expired = True
-                    self.active = False
-                    break
-            else:
-                time.sleep(0.3)
-
-
-class Device(StateMachine):
+class Device(ESMachine):
     """
     Your one-stop-shop for device communications.
     """
@@ -126,27 +61,24 @@ class Device(StateMachine):
         # id/info stuff.
         label = str(label)
         self.id = self._get_device_id(label)
-        self.info = {}
+        self.info = {}      # TODO
         self.address = address
+        try:
+            super().__init__(label)
+        except:
+            super(Device, self).__init__(label)
+        # control flow stuff.
+        self._set_up_daemon()
+        # non-state-machine process tracking.
+        self._active_threads = []
+        self._active_processes = []
         # set up logging.
         self._metadata_path, self._data_path = '', ''
         self._base_path = './test_data/'
         self._data_file_extension = 'log'
         self._set_file_paths()
-        # control flow stuff.
-        self._connected = False
-        self.state = 'SLEEPING'
-        self.event_queue = PriorityEventQueue()
-        self.daemon = StateMachine(str(self))
-        self._set_up_daemon()
-        # non-state-machine process tracking.
-        self._active_threads = []
-        self._active_processes = []
-        # initialize timers.
-        self.timers = []
-        self._set_up_timers()
         # start yer daemon up.
-        self.daemon.run()
+        self.run()
 
     def __str__(self):
         try:
@@ -154,6 +86,35 @@ class Device(StateMachine):
         except:
             return 'device'
     
+    # redefined as requested.
+    def _set_up_events(self):
+        self._add_event('NO_EVENT', _MIN_PRIORITY)
+        self._add_event('INIT_EVENT', _MAX_PRIORITY)
+        self._add_event('EXIT_EVENT', _MIN_PRIORITY)
+        self._add_event('COMPLETE_EVENT', _DEFAULT_PRIORITY)
+        self._add_event('CONNECTED_EVENT', _MAX_PRIORITY)
+        self._add_event('DISCONNECTED_EVENT', _MAX_PRIORITY)
+        self._add_event('CONNECT_REQUEST_EVENT', _DEFAULT_PRIORITY)
+        self._add_event('DISCONNECT_REQUEST_EVENT', _DEFAULT_PRIORITY)
+        self._add_event('CONNECT_TIMEOUT_EVENT', _MAX_PRIORITY)
+        self._add_event('DISCONNECT_TIMEOUT_EVENT', _MAX_PRIORITY)
+        return self.events
+
+    def _set_up_timers(self):
+        # redefine this to add/remove timeouts.
+        self._add_timer('connecting', 20.0, 'CONNECT_TIMEOUT_EVENT')
+        self._add_timer('disconnecting', 10.0, 'DISCONNECT_TIMEOUT_EVENT')
+        return self.timers
+
+    def _set_up_interrupts(self):
+        self.interrupts = {}
+        return self.interrupts
+
+    def _set_up_requests(self):
+        self._add_request('CONNECT', 'CONNECT_REQUEST_EVENT')
+        self._add_request('DISCONNECT', 'DISCONNECT_REQUEST_EVENT')
+        return self.requests
+
     # called from __init__().
     def _get_device_id(self, label):
         """
@@ -167,7 +128,6 @@ class Device(StateMachine):
     def _set_up_daemon(self):
         # NOTE : Redefine for different device types.
         _initial_state = 'SLEEPING'
-        self.info = {}
         state_handlers = [
                 ('SLEEPING', self._sleep),
                 ('CONNECTING', self._connect),
@@ -175,15 +135,8 @@ class Device(StateMachine):
                 ('DISCONNECTING', self._disconnect)
                 ]
         for state, handler in state_handlers:
-            self.daemon.add_state(state, handler)
-        self.daemon.set_up(start_state=_initial_state)
-
-    def _set_up_timers(self):
-        # redefine this to add/remove timeouts.
-        self._add_timer('connecting', 20.0, TIMEOUT_CONNECTING_EVENT)
-        self._add_timer('disconnecting', 10.0, TIMEOUT_DISCONNECTING_EVENT)
-        return self.timers
-
+            self.add_state(state, handler)
+        self.set_up(start_state=_initial_state)
 
     ## toolbelt.
     # file interractions.
@@ -201,7 +154,6 @@ class Device(StateMachine):
         with open(path, write_option) as fp:
             fp.write(data)
         return True
-
 
     def _read_txt(path):
         with open(path, 'r+') as tfp:
@@ -368,54 +320,6 @@ class Device(StateMachine):
                 'id': self.id
             }
 
-    # timers.
-    def _add_timer(self, label, duration, timeout_event):
-        # TODO : make timers a dict.
-        if label in [str(timer) for timer in self.timers]:
-            say('Timer '+label+' already exists', 'warning')
-        else:
-            newTimer = Timer(label, duration, timeout_event)
-            self.timers.append(newTimer)
-
-    def _start_timer(self, label):
-        for timer in self.timers:
-            if str(timer) == label:
-                timer.start()
-                return True
-        return False
-
-    def _reset_timers(self):
-        for timer in self.timers:
-            timer.reset()
-
-    def _check_timers(self):
-        for timer in self.timers:
-            if timer.expired:
-                # post a timeout event with max priority.
-                newEvent = PriorityEvent(timer.timeout_event, _MAX_PRIORITY)
-                self.event_queue.put(newEvent)
-                timer.reset()
-
-
-    # state machine appendages.
-    def _wait_for_ready(self, timeout=0.0):
-        # TODO : add timeout too.
-        self._kill_threads()
-        self._kill_processes()
-
-    def migrate_state(self, n_state):
-        """
-        :in: n_state (str) next state
-        """
-        self.event_queue.clear()            # clear any outstanding events.
-        self._wait_for_ready()              # wait for processes/threads to finish.
-        self._reset_timers()                # reset all timeouts.
-        self.daemon.set_state(n_state)      # and make the change.
-        init_event = PriorityEvent(INIT_EVENT, _MAX_PRIORITY)     # NOTE : is there a better way to initialize state?
-        self.event_queue.put(init_event)
-        self.state = n_state
-
-
     # device-specific functionalities to be redefined.
     def _link_comms(self):
         # connect to a device.
@@ -423,90 +327,86 @@ class Device(StateMachine):
 
     def _test_comms(self):
         # test communications with device.
-        pass
+        self._post_event('CONNECTED_EVENT')
 
     def _break_comms(self):
         # TODO : add test for disconnected. (not _test_comms)
-        newEvent = PriorityEvent(DISCONNECTED_EVENT, _MAX_PRIORITY)
-        self.event_queue.put(newEvent)
+        self._post_event('DISCONNECTED_EVENT')
 
     def _establish_connection(self, attempts=3):
         # REDEFINE : attempt to connect, test connection
-        _connected = True
-        return _connected
-        if attempts < 1:
-            attempts =1
-        _attempt = 1
-        while _attempt < attempts and not self._connected:
-            say('Connecting')
-            self._link_comms()
-            if self._test_comms():
-                newEvent = PriorityEvent(CONNECTED_EVENT, _MAX_PRIORITY)
-                self.event_queue.put(newEvent)
-                self._connected = True
-                say('Connected', 'success')
-                break
-            _attempt += 1
-            time.sleep(0.5)
-
+        self._test_comms()
+#        if attempts < 1:
+#            attempts =1
+#        _attempt = 1
+#        while _attempt < attempts and not self._connected:
+#            say('Connecting')
+#            self._link_comms()
+#            if self._test_comms():
+#                newEvent = PriorityEvent('CONNECTED_EVENT', _MAX_PRIORITY)
+#                self.event_queue.put(newEvent)
+#                self._connected = True
+#                say('Connected', 'success')
+#                break
+#            _attempt += 1
+#            time.sleep(0.5)
+#
 
     ## device-level state machine.
     def _wait_for_(self, state):
         while not self.state != state:
             time.sleep(0.1)
 
-    def _sleep(self):
+    def _sleep(self, this_event):
         """
         Sleeping.
         """
-        next_event = str(self.event_queue.get())
-        print(str(next_event))
-        if next_event == REQUEST_CONNECT_EVENT:
-            self.migrate_state('CONNECTING')
+        if this_event == 'INIT_EVENT':
+            self.printf('Sleeping...')
+        elif this_event == 'CONNECT_REQUEST_EVENT':
+            self._next_state = 'CONNECTING'
         else:
             time.sleep(0.3)
         
-    def _connect(self):
+    def _connect(self, this_event):
         """
         Connecting.
         """
-        next_event = str(self.event_queue.get())
         # init : attempt to connect, start timeout.
-        if next_event == INIT_EVENT:
-            self.attempt = 1
+        if this_event == 'INIT_EVENT':
+            self.printf('Connecting')
             self._start_timer('connecting')     # <-- adjust this timeout for fine tuning.
             self._establish_connection()
-        elif next_event == TIMEOUT_CONNECTING_EVENT:
-            self.migrate_state('SLEEPING')
-        elif next_event == CONNECTED_EVENT:
-            self.migrate_state('STANDING_BY')
-        elif next_event == REQUEST_DISCONNECT_EVENT:
-            self.migrate_state('DISCONNECTING')
+        elif this_event == 'CONNECT_TIMEOUT_EVENT':
+            self._next_state = 'SLEEPING'
+        elif this_event == 'CONNECTED_EVENT':
+            self._next_state = 'STANDING_BY'
+        elif this_event == 'DISCONNECT_REQUEST_EVENT':
+            self._next_state = 'DISCONNECTING'
         else:
             time.sleep(0.1)
 
-    def _disconnect(self):
-        next_event = str(self.event_queue.get())
-        if next_event == INIT_EVENT:
-            self._start_thread(self._break_comms, 'disconnecting')
+    def _disconnect(self, this_event):
+        if this_event == 'INIT_EVENT':
+            say('Disco nnecting...')
             self._start_timer('disconnecting')
-        elif next_event == DISCONNECTED_EVENT:
-            self.migrate_state('SLEEPING')
-        elif next_event == TIMEOUT_DISCONNECTING_EVENT:
+            self._break_comms()
+        elif this_event == 'DISCONNECTED_EVENT':
+            self._next_state = 'SLEEPING'
+        elif this_event == 'DISCONNECT_TIMEOUT_EVENT':
             say('Channel clogged; cannot disconnect', 'error')
-            self.migrate_state('SLEEPING')
+            self._next_state = 'SLEEPING'
         else:
             time.sleep(0.3)
 
-    def _idle(self):
+    def _idle(self, this_event):
         """
         Standing by.
         """
-        next_event = str(self.event_queue.get())
-        if next_event == INIT_EVENT:
+        if this_event == 'INIT_EVENT':
             say('Standing by')
-        if next_event == REQUEST_DISCONNECT_EVENT:
-            self.migrate_state('DISCONNECTING')
+        if this_event == 'DISCONNECT_REQUEST_EVENT':
+            self._next_state = 'DISCONNECTING'
         else:
             time.sleep(0.1)
 
@@ -518,16 +418,13 @@ class Device(StateMachine):
             * file_extension (str) txt [default]
         :out: success (Bool)
         """
-        newEvent = PriorityEvent(REQUEST_CONNECT_EVENT, _DEFAULT_PRIORITY)
-        self.event_queue.put(newEvent)
-        print(str(self.state))
+        self._incoming_requests.put((_DEFAULT_PRIORITY, 'CONNECT'))
 
-    def clean_up(self):
+    def disconnect(self):
         """
         Close down shop.
         """
-        newEvent = PriorityEvent(REQUEST_DISCONNECT_EVENT, _MAX_PRIORITY)
-        self.event_queue.put(newEvent)
+        self._incoming_requests.put((_DEFAULT_PRIORITY, 'DISCONNECT'))
 
     # datatype definitions.
     def generate_metadata(self):
@@ -545,8 +442,11 @@ class Device(StateMachine):
                 indent=4)
         self._write_file(metadata_path, metadata_str, 'a+')
 
-    # useful aliases.
-    set_up = connect
+    # state machine appendages.
+    def _wait_for_ready(self, timeout=0.0):
+        # TODO : add timeout too.
+        self._kill_threads()
+        self._kill_processes()
 
 #
 #    def _connect(self):
@@ -629,10 +529,10 @@ def _test_device():
     ddevice = Device(_dummy['label'],_dummy['address'])
     while 1<2:
         try:
-            ddevice.set_up()
-            ddevice._wait_for_('STANDING_BY')
+            ddevice.connect()
+            #ddevice._wait_for_('STANDING_BY')
             time.sleep(1)
-            ddevice.clean_up()
+            ddevice.disconnect()
 
         except KeyboardInterrupt:
             break
