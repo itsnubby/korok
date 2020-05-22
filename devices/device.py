@@ -22,28 +22,12 @@ except:
 # time/r stuff.
 _EPOCH = datetime.datetime(1970,1,1)
 # priorities.
-_MIN_PRIORITY = 0
-_MAX_PRIORITY = _MIN_PRIORITY + 5
-_DEFAULT_PRIORITY = _MIN_PRIORITY + 1
+_MAX_PRIORITY = 0       #_MIN_PRIORITY + 5
+_MIN_PRIORITY = _MAX_PRIORITY + 5       #0
+_DEFAULT_PRIORITY = _MAX_PRIORITY + 1   #_MIN_PRIORITY + 1
 
 
 ## Local functions.
-def _get_time_now(time_format='utc'):
-    """
-    Thanks Jon.  (;
-    :in: time_format (str) ['utc','epoch']
-    :out: timestamp (str)
-    """
-    if time_format == 'utc' or time_format == 'label':
-        return datetime.datetime.utcnow().strftime("%Y%m%d-%H%M%S")
-    elif time_format == 'epoch' or time_format == 'timestamp':
-        td = datetime.datetime.utcnow() - _EPOCH
-        return str(td.total_seconds())
-    else:
-        # NOTE: Failure to specify an appropriate time_format will cost
-        #         you one layer of recursion! YOU HAVE BEEN WARNED.  ) 0 o .
-        return _get_time_now(time_format='epoch')
-
 
 class Device(ESMachine):
     """
@@ -68,6 +52,7 @@ class Device(ESMachine):
         except:
             super(Device, self).__init__(label)
         # control flow stuff.
+        self.connected = multiprocessing.Value('i',0)       # 0 == unconnected, >0 == connected
         self._set_up_daemon()
         # non-state-machine process tracking.
         self._active_threads = []
@@ -86,6 +71,22 @@ class Device(ESMachine):
         except:
             return 'device'
     
+    def _check_wrist(self, time_format='utc'):
+        """
+        Thanks Jon.  (;
+        :in: time_format (str) ['utc','epoch']
+        :out: timestamp (str)
+        """
+        if time_format == 'utc' or time_format == 'label':
+            return datetime.datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+        elif time_format == 'epoch' or time_format == 'timestamp':
+            td = datetime.datetime.utcnow() - _EPOCH
+            return str(td.total_seconds())
+        else:
+            # NOTE: Failure to specify an appropriate time_format will cost
+            #         you one layer of recursion! YOU HAVE BEEN WARNED.  ) 0 o .
+            return self._check_wrist(time_format='epoch')
+
     # redefined as requested.
     def _set_up_events(self):
         self._add_event('NO_EVENT', _MIN_PRIORITY)
@@ -102,7 +103,7 @@ class Device(ESMachine):
 
     def _set_up_timers(self):
         # redefine this to add/remove timeouts.
-        self._add_timer('connecting', 20.0, 'CONNECT_TIMEOUT_EVENT')
+        self._add_timer('connecting', 10.0, 'CONNECT_TIMEOUT_EVENT')
         self._add_timer('disconnecting', 10.0, 'DISCONNECT_TIMEOUT_EVENT')
         return self.timers
 
@@ -190,7 +191,7 @@ class Device(ESMachine):
         return _decoder[encoding]
 
     def _set_file_paths(self):
-        timestamp_label = _get_time_now('label')
+        timestamp_label = self._check_wrist('label')
         self._set_metadata_path(timestamp_label)
         self._set_data_path(timestamp_label)
 
@@ -205,108 +206,6 @@ class Device(ESMachine):
             '_'.join([
                 self._base_path+timestamp_label,
                 str(self)]), self._data_file_extension])
-
-    # process and thread management.
-    def _start_process(self, target, name, args=(), kwargs={}):
-        """
-        Get them wheels turning.
-        :in: target (*funk)
-        :in: args (*)
-        :in: kwargs {*}
-        :out: process (Process)
-        """
-        process = multiprocessing.Process(target=target, args=args, kwargs=kwargs)
-        process.start()
-        if process.is_alive():
-            self._active_processes.append(process)
-            return process
-        return None
-
-    def _start_thread(self, target, name, args=(), kwargs={}):
-        """
-        Get them wheels turning.
-        :in: target (*funk)
-        :in: name (str) NOTE : set as daemon process with the word 'daemon' in here.
-        :in: args (*)
-        :in: kwargs {*}
-        :out: thread (Thread)
-        """
-        thread = threading.Thread(target=target, name=name, args=args, kwargs=kwargs)
-        if (name.find('daemon')) != -1:
-            thread.daemon = True
-        thread.start()
-        if thread.isAlive():
-            self._active_threads.append(thread)
-            return thread
-        return None
-
-    def _kill_process(self):
-        """
-        Terminate all active processes broh.
-        """
-        _timeout = 15   # <-- Set thread termination timeout (s) here.
-        _attempts = 2   # <-- Set number of attempts here.
-        for attempt in range(1,_attempts+1):
-            say(' '.join(['Attempt #',str(attempt),': waiting for',thread.name,'to terminate']))
-            process.join([_timeout])
-            if not process.is_alive():
-                say(' '.join([process.name,'terminated']), 'success')
-                self._active_processes.remove(process)
-                return True
-        return False
-
-    def _kill_processes(self):
-        """
-        Terminate all active processes broh.
-        """
-        while len(self._active_processes) > 0:
-            for process in self._active_processes:
-                if not self._kill_process(process):
-                    continue
-        return True
-
-    def _kill_thread(self, thread):
-        """
-        Terminate a thread.
-        :in: thread (*Thread)
-        :out: success (Bool)
-        """
-        _timeout = 15   # <-- Set thread termination timeout (s) here.
-        _attempts = 2   # <-- Set number of attempts here.
-        for attempt in range(1,_attempts+1):
-            say(' '.join(['Attempt #',str(attempt),': waiting for',thread.name,'to terminate']))
-            thread.join([_timeout])
-            if not thread.isAlive():
-                say(' '.join([thread.name,'terminated']), 'success')
-                self._active_threads.remove(thread)
-                return True
-        return False
-
-    def _kill_threads(self):
-        """
-        Terminate all active threads broh.
-        """
-        while len(self._active_threads) > 0:
-            for thread in self._active_threads:
-                if not self._kill_thread(thread):
-                    continue
-        return True
-
-    def _remove_old_threads(self):
-        """
-        Clean self._active_threads.
-        """
-        for thread in self._active_threads:
-            if not thread.isAlive():
-                self._active_threads.remove(thread)
-
-    def _remove_old_processes(self):
-        """
-        Clean self._active_processes.
-        """
-        for process in self._active_processes:
-            if not process.is_alive():
-                self._active_processes.remove(process)
 
     # metadata generation.
     def _fill_info(self):
@@ -323,38 +222,31 @@ class Device(ESMachine):
     # device-specific functionalities to be redefined.
     def _link_comms(self):
         # connect to a device.
-        pass
-
-    def _test_comms(self):
-        # test communications with device.
-        self._post_event('CONNECTED_EVENT')
+        time.sleep(4)
+        self.connected.value += 1
+        time.sleep(20)
 
     def _break_comms(self):
         # TODO : add test for disconnected. (not _test_comms)
-        self._post_event('DISCONNECTED_EVENT')
+        time.sleep(4)
+        self.connected.value = 0
+        time.sleep(2)
 
-    def _establish_connection(self, attempts=3):
-        # REDEFINE : attempt to connect, test connection
-        self._test_comms()
-#        if attempts < 1:
-#            attempts =1
-#        _attempt = 1
-#        while _attempt < attempts and not self._connected:
-#            say('Connecting')
-#            self._link_comms()
-#            if self._test_comms():
-#                newEvent = PriorityEvent('CONNECTED_EVENT', _MAX_PRIORITY)
-#                self.event_queue.put(newEvent)
-#                self._connected = True
-#                say('Connected', 'success')
-#                break
-#            _attempt += 1
-#            time.sleep(0.5)
-#
+    def _test_comms(self):
+        # test communications with device.
+        if self.connected.value > 0:
+            if self.state == 'CONNECTING':
+                self._post_event('CONNECTED_EVENT')
+            self.printf(str(self)+' currently connected')
+        elif self.connected.value == 0:
+            if self.state == 'DISCONNECTING':
+                self._post_event('DISCONNECTED_EVENT')
+            self.printf(str(self)+' currently disconnected')
 
     ## device-level state machine.
     def _wait_for_(self, state):
-        while not self.state != state:
+        # nice for debugging. (;;
+        while not self.state == state:
             time.sleep(0.1)
 
     def _sleep(self, this_event):
@@ -362,7 +254,7 @@ class Device(ESMachine):
         Sleeping.
         """
         if this_event == 'INIT_EVENT':
-            self.printf('Sleeping...')
+            self.printf('Sleeping')
         elif this_event == 'CONNECT_REQUEST_EVENT':
             self._next_state = 'CONNECTING'
         else:
@@ -376,7 +268,7 @@ class Device(ESMachine):
         if this_event == 'INIT_EVENT':
             self.printf('Connecting')
             self._start_timer('connecting')     # <-- adjust this timeout for fine tuning.
-            self._establish_connection()
+            self._start_process(self._link_comms, 'CONNECTOR')
         elif this_event == 'CONNECT_TIMEOUT_EVENT':
             self._next_state = 'SLEEPING'
         elif this_event == 'CONNECTED_EVENT':
@@ -384,13 +276,15 @@ class Device(ESMachine):
         elif this_event == 'DISCONNECT_REQUEST_EVENT':
             self._next_state = 'DISCONNECTING'
         else:
-            time.sleep(0.1)
+            time.sleep(0.3)
+            self._test_comms()
+            time.sleep(0.3)
 
     def _disconnect(self, this_event):
         if this_event == 'INIT_EVENT':
-            say('Disco nnecting...')
+            self.printf('Disco nnecting...')
             self._start_timer('disconnecting')
-            self._break_comms()
+            self._start_process(self._break_comms, 'DISCONNECTOR')
         elif this_event == 'DISCONNECTED_EVENT':
             self._next_state = 'SLEEPING'
         elif this_event == 'DISCONNECT_TIMEOUT_EVENT':
@@ -398,13 +292,15 @@ class Device(ESMachine):
             self._next_state = 'SLEEPING'
         else:
             time.sleep(0.3)
+            self._test_comms()
+            time.sleep(0.3)
 
     def _idle(self, this_event):
         """
         Standing by.
         """
         if this_event == 'INIT_EVENT':
-            say('Standing by')
+            self.printf('Standing by')
         if this_event == 'DISCONNECT_REQUEST_EVENT':
             self._next_state = 'DISCONNECTING'
         else:
@@ -432,7 +328,7 @@ class Device(ESMachine):
         Output metadata as a .json dictionary.
         """
         say('Generating metadata for '+self.id)
-        timestamp_label = _get_time_now('label')
+        timestamp_label = self._check_wrist('label')
         metadata_path = '_'.join([
             self._base_path+timestamp_label,
             self.id+'.json'])
@@ -441,83 +337,6 @@ class Device(ESMachine):
                 sort_keys=True,
                 indent=4)
         self._write_file(metadata_path, metadata_str, 'a+')
-
-    # state machine appendages.
-    def _wait_for_ready(self, timeout=0.0):
-        # TODO : add timeout too.
-        self._kill_threads()
-        self._kill_processes()
-
-#
-#    def _connect(self):
-#        """
-#        Change state here.
-#        """
-#        success = False
-#        timeout = 10.0      # <-- Edit connection timeout / attempt here.
-#        self.migrate_state('connecting')
-#        attempt = 1
-#        self.channel = self._link_comms()
-#        _timer = self._start_thread(self._countdown, 'connecting', (timeout))
-#        while 1<2:
-#            # Only return success if connection confirmed.
-#            if self._test_comms():
-#                self.migrate_state('standing_by')
-#                success = True
-#                break
-#            # Try again if the timer expires.
-#            if not _timer.is_alive():
-#                self._disconnect()
-#                attempt += 1
-#                if attempt > attempts:
-#                    say('Failed to connect to '+str(self), 'error')
-#                    self.migrate_state('sleeping')
-#                    break
-#                self._start_thread(self._link_comms, 'connecting')
-#                _timer = self._start_thread(self._countdown, 'connecting', (timeout))
-#            time.sleep(0.1)
-#        return success
-#        channel = None
-#        try:
-#            if self.interface == 'serial':
-#                self.channel = Serial.serial(address)
-#            elif interface == 'i2c':
-#                channel = smbus.SMBus(address)
-#            return channel
-#        except:
-#            raise Exception
-#
-#    def _disconnect(self):
-#        """
-#        Change state here.
-#        """
-#        raise NotImplementedError
-#
-#    def set_file_path(self, path_base='./test_data/'):
-#        """
-#        Set the base of the output path for data flow.
-#        :in: path_base (str) working directory [default]
-#        """
-#        if not os.path.isdir(path_base):
-#            say('Creating '+path_base)
-#            try:
-#            os.mkdir(path_base)
-#            except:
-#                say(''.join([
-#                        'Could not create directory at ',
-#                        path_base,
-#                        '; using default directory']),
-#                    'warning')
-#                path_base = './test_data/'
-#        self._base_path = path_base
-#        timestamp_label = _get_time_now('label')
-#        self.file_path = '.'.join([
-#            '_'.join([
-#                self._base_path+timestamp_label,
-#                self.id]),
-#            self.file_extension])
-#
-
 
 
 ## testers.
@@ -530,10 +349,10 @@ def _test_device():
     while 1<2:
         try:
             ddevice.connect()
-            #ddevice._wait_for_('STANDING_BY')
+            ddevice._wait_for_('STANDING_BY')
             time.sleep(1)
             ddevice.disconnect()
-
+            time.sleep(5)
         except KeyboardInterrupt:
             break
 

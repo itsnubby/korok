@@ -1,6 +1,6 @@
 """
 control.py - I WILL BE IN CONTROLOLOL!
-modified : 5/11/2020
+modified : 5/22/2020
      ) 0 o .
 """
 import threading, multiprocessing, copy, datetime
@@ -48,6 +48,7 @@ class Timer(object):
         self._end_time = None
         self.active = False
         self.expired = False
+        self._decimate = True
 
     def _start_thread(self, target, name, args=(), kwargs={}):
         """
@@ -66,29 +67,38 @@ class Timer(object):
             return thread
         return None
 
+    def set(self, duration):
+        if not self.active:
+            self.duration = duration
+        else:
+            say('Cannot set an active timer')
+
     def start(self):
         self._start_thread(self._countdown, 'timer')
         self.active = True
+        self._decimate = False
 
     def pause(self):
         self.active = False
 
+    def kill(self):
+        self._decimate = True
+
     def reset(self):
-        self._start_time = None
-        self._end_time = None
+        self.__init__(self.duration)
 
     def _countdown(self):
         _start_time = float(_get_time_now('epoch'))
         self._start_time = _start_time
-        while 1<2:
+        while not self._decimate:
             if self.active:
                 _current_time = float(_get_time_now('epoch'))
                 _time_elapsed = _current_time - _start_time
                 if _time_elapsed >= self.duration:
-                    break
+                    self.expired = True
             else:
+                _start_time = float(_get_time_now('epoch')) # need to re-adjust start time when paused.
                 time.sleep(0.3)
-        self.expired = True
         self.active = False
         self._end_time = float(_get_time_now('epoch'))
 
@@ -115,6 +125,20 @@ class StateMachine(object):
         say(str(self)+' : '+prompt)
 
     ## helper functions.
+    # process and thread management.
+    def _start_process(self, target, name, args=(), kwargs={}):
+        """
+        Get them wheels turning.
+        :in: target (*funk)
+        :in: args (*)
+        :in: kwargs {*}
+        :out: process (Process)
+        """
+        process = multiprocessing.Process(target=target, args=args, kwargs=kwargs)
+        process.start()
+        self._active_processes.append(process)
+        return process
+
     def _start_thread(self, target, name, args=(), kwargs={}):
         """
         Get them wheels turning.
@@ -132,8 +156,76 @@ class StateMachine(object):
             return thread
         return None
 
+    def _kill_process(self):
+        """
+        Terminate all active processes broh.
+        """
+        _timeout = 15   # <-- Set thread termination timeout (s) here.
+        _attempts = 2   # <-- Set number of attempts here.
+        for attempt in range(1,_attempts+1):
+            say(' '.join(['Attempt #',str(attempt),': waiting for',thread.name,'to terminate']))
+            process.join([_timeout])
+            if not process.is_alive():
+                say(' '.join([process.name,'terminated']), 'success')
+                self._active_processes.remove(process)
+                return True
+        return False
+
+    def _kill_processes(self):
+        """
+        Terminate all active processes broh.
+        """
+        while len(self._active_processes) > 0:
+            for process in self._active_processes:
+                if not self._kill_process(process):
+                    continue
+        return True
+
+    def _kill_thread(self, thread):
+        """
+        Terminate a thread.
+        :in: thread (*Thread)
+        :out: success (Bool)
+        """
+        _timeout = 15   # <-- Set thread termination timeout (s) here.
+        _attempts = 2   # <-- Set number of attempts here.
+        for attempt in range(1,_attempts+1):
+            say(' '.join(['Attempt #',str(attempt),': waiting for',thread.name,'to terminate']))
+            thread.join([_timeout])
+            if not thread.isAlive():
+                say(' '.join([thread.name,'terminated']), 'success')
+                self._active_threads.remove(thread)
+                return True
+        return False
+
+    def _kill_threads(self):
+        """
+        Terminate all active threads broh.
+        """
+        while len(self._active_threads) > 0:
+            for thread in self._active_threads:
+                if not self._kill_thread(thread):
+                    continue
+        return True
+
+    def _remove_old_threads(self):
+        """
+        Clean self._active_threads.
+        """
+        for thread in self._active_threads:
+            if not thread.isAlive():
+                self._active_threads.remove(thread)
+
+    def _remove_old_processes(self):
+        """
+        Clean self._active_processes.
+        """
+        for process in self._active_processes:
+            if not process.is_alive():
+                self._active_processes.remove(process)
+
     def _run(self):
-        self.printf('Starting up')
+        self.printf('Starting up'+str(self))
         while 1<2:
             self.handlers[self.state]()
 
@@ -162,9 +254,9 @@ class StateMachine(object):
 
 ## Events/Services State Machine:
 # priorities.
-_MIN_PRIORITY = 0
-_MAX_PRIORITY = _MIN_PRIORITY + 5
-_DEFAULT_PRIORITY = _MIN_PRIORITY + 1
+_MAX_PRIORITY = 0
+_MIN_PRIORITY = _MAX_PRIORITY + 5
+_DEFAULT_PRIORITY = _MAX_PRIORITY + 1
 
 class ESMachine(StateMachine):
     """
@@ -226,14 +318,20 @@ class ESMachine(StateMachine):
                 'timeout_event_name': timeout_event_name
                 }
 
+    def _set_timer(self, label, duration):
+        try:
+            self.timers[label]['timer'].set(duration)
+        except:
+            self.printf('Could not set timer')
+
     def _start_timer(self, label):
-#        try:
+        try:
             self.timers[label]['timer'].start()
             self._active_timer_names.append(label)
             return True
-#        except:
-#            self.printf('Cannot start timer; timer '+label+' not added')
-#            return False
+        except:
+            self.printf('Cannot start timer; timer '+label+' not added')
+            return False
 
     # requests.
     def _add_request(self, label, request_event_name=''):
@@ -305,11 +403,13 @@ class ESMachine(StateMachine):
         self._check_interrupts()
         self._check_timers()
         self._check_requests()
+        self._remove_old_threads()
+        self._remove_old_processes()
         if self.state != self._next_state and self._next_state in self.available_states:
             self.migrate_state()
 
     def _run(self):
-        self.printf('Starting up')
+        self.printf('Starting up'+str(self))
         while 1<2:
             event_name = self._get_event()
             self.handlers[self.state](event_name)
