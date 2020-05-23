@@ -60,7 +60,6 @@ class Device(ESMachine):
         # set up logging.
         self._metadata_path, self._data_path = '', ''
         self._base_path = './test_data/'
-        self._data_file_extension = 'log'
         self._set_file_paths()
         # start yer daemon up.
         self.run()
@@ -193,7 +192,7 @@ class Device(ESMachine):
     def _set_file_paths(self):
         timestamp_label = self._check_wrist('label')
         self._set_metadata_path(timestamp_label)
-        self._set_data_path(timestamp_label)
+        self._set_data_paths(timestamp_label)
 
     def _set_metadata_path(self, timestamp_label):
         self._metadata_path = '.'.join([
@@ -201,11 +200,13 @@ class Device(ESMachine):
                 self._base_path+timestamp_label,
                 'metadata']), 'json'])
 
-    def _set_data_path(self, timestamp_label):
+    def _set_data_paths(self, timestamp_label):
+        # REDEFINE if more than one data file possible.
+        _file_extension = 'log'
         self_data_path = '.'.join([
             '_'.join([
                 self._base_path+timestamp_label,
-                str(self)]), self._data_file_extension])
+                str(self)]), _file_extension])
 
     # metadata generation.
     def _fill_info(self):
@@ -223,8 +224,8 @@ class Device(ESMachine):
     def _link_comms(self):
         # connect to a device.
         time.sleep(4)
-        self.connected.value += 1
         time.sleep(20)
+        self.connected.value += 1
 
     def _break_comms(self):
         # TODO : add test for disconnected. (not _test_comms)

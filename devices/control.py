@@ -4,6 +4,7 @@ modified : 5/22/2020
      ) 0 o .
 """
 import threading, multiprocessing, copy, datetime
+from threading import Thread
 try:        # Python3
     from .squawk import ask, say
     from .eventful import PriorityEvent, PriorityEventQueue
@@ -17,6 +18,26 @@ except:
 # for testing.
 import sys, time
 # TODO : add states as a dictionary with handler and events -> actions defined.
+
+# non-blocking thread.
+class NonBlockingThread(Thread):
+    def __init__(self, target, name, args=(), kwargs={}):
+        self._running_flag = False  # when killed by exception.
+        self.stop = threading.Event()
+        self.q_tip = target
+        Thread.__init__(self, target=self.method_man)   # TODO : actually do this
+
+    def method_man(self):
+        try:
+            while(not self.stop.wait(1)):
+                self._running_flag = True
+                self.q_tip()
+        finally:
+            self._running_flag = False
+
+    def kill(self):
+        self.stop.set()
+
 
 ## timer class.     TODO : move outta here.
 _EPOCH = datetime.datetime(1970,1,1)
@@ -102,6 +123,7 @@ class Timer(object):
         self.active = False
         self._end_time = float(_get_time_now('epoch'))
 
+
 ## globalization.
 class StateMachine(object):
     """
@@ -135,8 +157,10 @@ class StateMachine(object):
         :out: process (Process)
         """
         process = multiprocessing.Process(target=target, args=args, kwargs=kwargs)
+        process.daemon = True
         process.start()
-        self._active_processes.append(process)
+        if process.is_alive():
+            self._active_processes.append(process)
         return process
 
     def _start_thread(self, target, name, args=(), kwargs={}):
@@ -156,20 +180,14 @@ class StateMachine(object):
             return thread
         return None
 
-    def _kill_process(self):
+    def _kill_process(self, process):
         """
         Terminate all active processes broh.
         """
-        _timeout = 15   # <-- Set thread termination timeout (s) here.
-        _attempts = 2   # <-- Set number of attempts here.
-        for attempt in range(1,_attempts+1):
-            say(' '.join(['Attempt #',str(attempt),': waiting for',thread.name,'to terminate']))
-            process.join([_timeout])
-            if not process.is_alive():
-                say(' '.join([process.name,'terminated']), 'success')
-                self._active_processes.remove(process)
-                return True
-        return False
+        process.terminate()
+        process.join()
+        if not process.is_alive():
+            self._active_processes.remove(process)
 
     def _kill_processes(self):
         """
@@ -191,7 +209,7 @@ class StateMachine(object):
         _attempts = 2   # <-- Set number of attempts here.
         for attempt in range(1,_attempts+1):
             say(' '.join(['Attempt #',str(attempt),': waiting for',thread.name,'to terminate']))
-            thread.join([_timeout])
+            thread.join()
             if not thread.isAlive():
                 say(' '.join([thread.name,'terminated']), 'success')
                 self._active_threads.remove(thread)
@@ -204,7 +222,7 @@ class StateMachine(object):
         """
         while len(self._active_threads) > 0:
             for thread in self._active_threads:
-                if not self._kill_thread(thread):
+                if not self._kill_thread(thread) or thread.name.find('daemon'):
                     continue
         return True
 
@@ -395,6 +413,7 @@ class ESMachine(StateMachine):
     def migrate_state(self):
         self.event_queue.clear()            # clear any outstanding events.
         self._reset_timers()                # reset all timeouts.
+        self._kill_processes()
         self.state = self._next_state
         self._post_event('INIT_EVENT')
 
@@ -436,5 +455,20 @@ def _test_control():
         time.sleep(5)
         nublette.set_state('killing')
 
+def _nublette():
+    while 1<2:
+        print('Hi nub.')
+        time.sleep(1)
+
+def _test_nbts():
+    nub = NonBlockingThread(_nublette, 'nub')
+    nub.start()
+    time.sleep(4)
+    print('git lit')
+    nub.kill()
+    nub.join()
+    print('Goodonya')
+
 if __name__ == '__main__':
-    _test_control()
+    _test_nbts()
+    #_test_control()
