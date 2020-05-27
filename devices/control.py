@@ -67,9 +67,9 @@ class Timer(object):
         self._active_threads = []
         self._start_time = None
         self._end_time = None
-        self.active = False
-        self.expired = False
-        self._decimate = True
+        self.active = multiprocessing.Value('i', 0)
+        self.expired = multiprocessing.Value('i', 0)
+        self._decimate = multiprocessing.Value('i', 0)
 
     def _start_thread(self, target, name, args=(), kwargs={}):
         """
@@ -89,21 +89,21 @@ class Timer(object):
         return None
 
     def set(self, duration):
-        if not self.active:
+        if not self.active.value > 0:
             self.duration = duration
         else:
             say('Cannot set an active timer')
 
     def start(self):
         self._start_thread(self._countdown, 'timer')
-        self.active = True
-        self._decimate = False
+        self.active.value = 1
+        self._decimate.value = 0
 
     def pause(self):
-        self.active = False
+        self.active.value = 0
 
     def kill(self):
-        self._decimate = True
+        self._decimate.value = 1
 
     def reset(self):
         self.__init__(self.duration)
@@ -111,18 +111,23 @@ class Timer(object):
     def _countdown(self):
         _start_time = float(_get_time_now('epoch'))
         self._start_time = _start_time
-        while not self._decimate:
-            if self.active:
+        while not self._decimate.value > 0:
+            if self.active.value > 0:
                 _current_time = float(_get_time_now('epoch'))
                 _time_elapsed = _current_time - _start_time
                 if _time_elapsed >= self.duration:
-                    self.expired = True
+                    self.expired.value = 1
+                    break
             else:
                 _start_time = float(_get_time_now('epoch')) # need to re-adjust start time when paused.
                 time.sleep(0.3)
-        self.active = False
+        self.active.value = 0
         self._end_time = float(_get_time_now('epoch'))
 
+    def is_expired(self):
+        if self.expired.value > 0:
+            return True
+        return False
 
 ## globalization.
 class StateMachine(object):
@@ -338,7 +343,8 @@ class ESMachine(StateMachine):
 
     def _set_timer(self, label, duration):
         try:
-            self.timers[label]['timer'].set(duration)
+            _duration = float(copy.deepcopy(duration))
+            self.timers[label]['timer'].set(_duration)
         except:
             self.printf('Could not set timer')
 
@@ -377,7 +383,7 @@ class ESMachine(StateMachine):
     # checkers.
     def _check_timers(self):
         for timer_name in self._active_timer_names:
-            if self.timers[timer_name]['timer'].expired:
+            if self.timers[timer_name]['timer'].is_expired():
                 # post a timeout event, reset timer, remove from active timers.
                 self._post_event(self.timers[timer_name]['timeout_event_name'])
                 self.timers[timer_name]['timer'].reset()
@@ -469,6 +475,10 @@ def _test_nbts():
     nub.join()
     print('Goodonya')
 
+def _test_timers():
+    nublord = ESMachine()
+
 if __name__ == '__main__':
-    _test_nbts()
+    #_test_nbts()
     #_test_control()
+    _test_timers()

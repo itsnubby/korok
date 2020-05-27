@@ -57,6 +57,7 @@ class Device(ESMachine):
         # non-state-machine process tracking.
         self._active_threads = []
         self._active_processes = []
+        self._shared_space_queue = multiprocessing.Queue()      # pass this to processes that need to make changes to shared memory space.
         # set up logging.
         self._metadata_path, self._data_path = '', ''
         self._base_path = './test_data/'
@@ -189,7 +190,23 @@ class Device(ESMachine):
                 }
         return _decoder[encoding]
 
+    def _build_base_path(self):
+        _path_bits = self._base_path.split('/')
+        _full_path = ''
+        for _bit in _path_bits:
+            _full_path += _bit + '/'
+            if not os.path.isdir(_full_path) and _bit:
+                try:
+                    os.mkdir(_full_path)
+                    self.printf('...'+_full_path)
+                except:
+                    self.printf('Coudn\'t mkdir '+_full_path)
+
+
     def _set_file_paths(self):
+        if not os.path.isdir(self._base_path):
+            print(str(self._base_path))
+            self._build_base_path()
         timestamp_label = self._check_wrist('label')
         self._set_metadata_path(timestamp_label)
         self._set_data_paths(timestamp_label)
@@ -210,14 +227,15 @@ class Device(ESMachine):
 
     # metadata generation.
     def _fill_info(self):
+        # REDEFINE for each device.
         """
         Chat up the device to find where it lives as well
           as how to get into its front door.
         :in: old_info {dict} - any old metadata 'bout the device.
         """
         self.info = {
-                'address': self.address,
-                'id': self.id
+                'address': str(self.address),
+                'id': str(self.id)
             }
 
     # device-specific functionalities to be redefined.
@@ -244,6 +262,7 @@ class Device(ESMachine):
                 self._post_event('DISCONNECTED_EVENT')
             self.printf(str(self)+' currently disconnected')
 
+
     ## device-level state machine.
     def _wait_for_(self, state):
         # nice for debugging. (;;
@@ -269,8 +288,9 @@ class Device(ESMachine):
         if this_event == 'INIT_EVENT':
             self.printf('Connecting')
             self._start_timer('connecting')     # <-- adjust this timeout for fine tuning.
-            self._start_process(self._link_comms, 'CONNECTOR')
+            self._start_thread(self._link_comms, 'CONNECTOR')
         elif this_event == 'CONNECT_TIMEOUT_EVENT':
+            print('TIME')
             self._next_state = 'SLEEPING'
         elif this_event == 'CONNECTED_EVENT':
             self._next_state = 'STANDING_BY'
@@ -285,7 +305,7 @@ class Device(ESMachine):
         if this_event == 'INIT_EVENT':
             self.printf('Disco nnecting...')
             self._start_timer('disconnecting')
-            self._start_process(self._break_comms, 'DISCONNECTOR')
+            self._start_thread(self._break_comms, 'DISCONNECTOR')
         elif this_event == 'DISCONNECTED_EVENT':
             self._next_state = 'SLEEPING'
         elif this_event == 'DISCONNECT_TIMEOUT_EVENT':
@@ -302,7 +322,7 @@ class Device(ESMachine):
         """
         if this_event == 'INIT_EVENT':
             self.printf('Standing by')
-        if this_event == 'DISCONNECT_REQUEST_EVENT':
+        elif this_event == 'DISCONNECT_REQUEST_EVENT':
             self._next_state = 'DISCONNECTING'
         else:
             time.sleep(0.1)
@@ -329,6 +349,7 @@ class Device(ESMachine):
         Output metadata as a .json dictionary.
         """
         say('Generating metadata for '+self.id)
+        self._fill_info()
         timestamp_label = self._check_wrist('label')
         metadata_path = '_'.join([
             self._base_path+timestamp_label,
