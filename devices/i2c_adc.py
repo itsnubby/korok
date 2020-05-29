@@ -4,7 +4,7 @@ Radish'n'bots, LLC
 modified : 5/29/2020
      ) 0 o .
 """
-import time, sys
+import time, sys, re, multiprocessing
 import subprocess as sp
 try:
     from .device import Device, _MIN_PRIORITY, _MAX_PRIORITY, _DEFAULT_PRIORITY
@@ -47,19 +47,22 @@ def find_i2c_addresses():
 
     # parse out i2c addresses.
     while 1<2:
-        _i2c_line_str = str(_i2c_list_proc.stdout.readline())
+        _i2c_line_str = str(_i2c_list_proc.stdout.readline().decode(encoding='UTF-8')).strip()
         # exit loop if out of lines.
-        if not _i2c_line_str:
+        time.sleep(0.3)
+        if _i2c_line_str == '':
             break
-        print(str(_i2c_line_str))
         _i2c_fields = _i2c_line_str.split(' ')
+        # regex shiz.
+        _regex = re.compile('[0-9]{2}')
         # skip the first line.
         if _i2c_fields[0].find(':')!=-1:
-            for address in range(1,len(_i2c_fields)):
-                if address != '--':
+            for index in range(1,len(_i2c_fields)):
+                address = _i2c_fields[index]
+                if _regex.match(address):
                     print('Found the I2C device at '+address)
-                    address = '0x'+address
-                    i2c_address.append(address)
+                    address = str(address)
+                    i2c_addresses.append(address)
     return i2c_addresses
 
 
@@ -72,6 +75,8 @@ class ADS1115(Device):
             super().__init__(label, address)
         except:
             super(ADS1115, self).__init__(label, address)
+        self.streaming = multiprocessing.Value('i', 0)
+        self.record_time = 0.0
         self.f_sample = 2.0
         self.T_sample = 1 / self.f_sample
 
@@ -116,6 +121,16 @@ class ADS1115(Device):
         self._add_request('STOP_RECORDING', 'STOP_RECORDING_REQUEST_EVENT')
         return self.requests
 
+    def _set_up_options(self):
+        option_lut = {
+                'record': False,
+                'gain': _DEFAULT_ADC_GAIN,
+                'write': True,
+                'preview': False,
+                'mode': 'continuous'        # << TODO : get rid o dis.
+                }
+        return option_lut
+
     # called from __init__().
     def _get_device_id(self, label):
         """
@@ -125,6 +140,9 @@ class ADS1115(Device):
         """
         # 'sensor' if not redefined.
         return '-'.join(['ads1115',str(label)])
+
+    def _get_device_address(self, address_str):
+        return int(address_str)
 
     def _set_data_paths(self, timestamp_label):
         _data_extension = 'csv'
@@ -175,11 +193,11 @@ class ADS1115(Device):
         _reps = 0               # Gimme some more reps.
         while 1<2:
             _value = 0
-            #try:
-            _value = self.channel.read_adc(sub_channel, gain=_DEFAULT_ADC_GAIN, data_rate=_DEFAULT_ADC_DATA_RATE)
-            #except:
-            #    # TODO
-            #    return False
+#            try:
+            _value = self.channel.read_adc(sub_channel, gain=self.option['gain'])
+#            except:
+#                # TODO
+#                return False
             if _value == _prev_value:
                 time.sleep(self.T_sample)
                 _reps += 1
@@ -201,11 +219,12 @@ class ADS1115(Device):
         thread to build a bridge  ) 0 o .with a camera.
         """
         # Attempt to connect to main channel.
-        self.channel = Adafruit_ADS1x15.ADS1115(self.address, self.bus)
+        self.channel = Adafruit_ADS1x15.ADS1115(address=self.address)
         if self.channel:
             # Find available ADC channels.
             self._find_sub_channels()
-            self.connect.value = 1
+            self.printf('Connected')
+            self.connected.value = 1
 
     def _break_comms(self):
         self.channel = None     # TODO : test if we can reconnect after this.
@@ -241,25 +260,26 @@ class ADS1115(Device):
             pass
 
     def _get_data(self):
+        _data_train = []
         for sub_channel in self._sub_channels:
-            _data_train = []
-            try:
-                _data_train.append(
-                        self.channel.read_adc(
-                            sub_channel, gain=self.option['gain']))     # TODO : add gain.
-            except:
-                pass
+#            try:
+            _data_line = self.channel.read_adc(sub_channel, gain=self.option['gain'])
+            _data_train.append(_data_line)
+#            except:
+#                pass
         return ', '.join(_data_train)
 
 
     def _stream_data(self):
         self._set_file_paths()      # metadata, data
+        self.streaming.value = 1
         while self.streaming.value > 0:
-            try:
-                _data_line = self._get_data()
-                self._broadcast(_data_line)
-            except:
-                break
+#            try:
+            _data_line = self._get_data()
+            self.printf(_data_line)
+            self._broadcast(_data_line)
+#            except:
+#                break
 
     
     # ESMachine redefinements/additions.
@@ -278,9 +298,10 @@ class ADS1115(Device):
         From device to ???.
         """
         if this_event == 'INIT_EVENT':
-            self.printf('Recording : '+str(self.channel)+' for '+str(self.record_time))
+            self.printf('Opening stream')
             self._start_timer('streaming')
-            if self.option['mode'] != 'continuous' and self.options['record']:
+            if self.option['mode'] != 'continuous' and self.option['record']:
+                self.printf('Recording : '+str(self.channel)+' for '+str(self.record_time))
                 self._start_timer('recording')
             self._start_thread(self._stream_data, 'STREAMER')
         elif this_event == 'RECORDING_TIMEOUT_EVENT' or this_event == 'STOP_RECORDING_REQUEST_EVENT':
@@ -334,12 +355,14 @@ def test_adc():
         # Find I2C connections.
         i2c_addresses = find_i2c_addresses()
         for index, address in enumerate(i2c_addresses):
+            print(str(address))
             adcs.append(ADS1115(str(index), address))
         # Try to connect.
         for nerd in adcs:
             nerd.connect()
         # Wait for timeouts. << TODO : make more responsive.
-        time.sleep(_CONNECT_TIMEOUT)
+        for nerd in adcs:
+            nerd._wait_for_('STANDING_BY')
         for nerd in adcs:
             # Make sure that all devices are properly hooked up.
             if not nerd.is_connected:

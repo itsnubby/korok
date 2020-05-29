@@ -45,9 +45,9 @@ class Device(ESMachine):
         # id/info stuff.
         label = str(label)
         self.id = self._get_device_id(label)
+        self.address = self._get_device_address(address)
         self.info = {}      # TODO
-        self.address = address
-        self.option = {}
+        self.option = self._set_up_options()
         try:
             super().__init__(label)
         except:
@@ -127,6 +127,9 @@ class Device(ESMachine):
         self._add_request('DISCONNECT', 'DISCONNECT_REQUEST_EVENT')
         return self.requests
 
+    def _set_up_options(self):
+        return {} 
+
     # called from __init__().
     def _get_device_id(self, label):
         """
@@ -136,6 +139,10 @@ class Device(ESMachine):
         """
         # 'device' if not redefined!
         return '-'.join(['device',label])
+
+    def _get_device_address(self, address_str):
+        # convert address string into proper format.
+        return str(address_str)
 
     def _set_up_daemon(self):
         # NOTE : Redefine for different device types.
