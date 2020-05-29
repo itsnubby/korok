@@ -47,7 +47,7 @@ def find_i2c_addresses():
 
     # parse out i2c addresses.
     while 1<2:
-        _i2c_line_str = str(_i2c_list_proc.readline())
+        _i2c_line_str = str(_i2c_list_proc.stdout.readline())
         # exit loop if out of lines.
         if not _i2c_line_str:
             break
