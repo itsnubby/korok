@@ -248,7 +248,7 @@ class StateMachine(object):
                 self._active_processes.remove(process)
 
     def _run(self):
-        self.printf('Starting up'+str(self))
+        self.printf('Starting up '+str(self))
         while 1<2:
             self.handlers[self.state]()
 
