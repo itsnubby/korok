@@ -47,6 +47,7 @@ class Device(ESMachine):
         self.id = self._get_device_id(label)
         self.info = {}      # TODO
         self.address = address
+        self.option = {}
         try:
             super().__init__(label)
         except:
@@ -86,6 +87,16 @@ class Device(ESMachine):
             # NOTE: Failure to specify an appropriate time_format will cost
             #         you one layer of recursion! YOU HAVE BEEN WARNED.  ) 0 o .
             return self._check_wrist(time_format='epoch')
+
+    def _set_option(self, key, value):
+        # set options that are output as metadata and may affect function.
+        self.option[key] = value
+
+    ## ui
+    def is_connected(self):
+        if self.connected.value == 0:
+            return False
+        return True
 
     # redefined as requested.
     def _set_up_events(self):
@@ -235,7 +246,8 @@ class Device(ESMachine):
         """
         self.info = {
                 'address': str(self.address),
-                'id': str(self.id)
+                'id': str(self.id),
+                'options': self.option
             }
 
     # device-specific functionalities to be redefined.
