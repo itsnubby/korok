@@ -51,6 +51,7 @@ def find_i2c_addresses():
         # exit loop if out of lines.
         if not _i2c_line_str:
             break
+        print(str(_i2c_line_str))
         _i2c_fields = _i2c_line_str.split(' ')
         # skip the first line.
         if _i2c_fields[0].find(':')!=-1:
