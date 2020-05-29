@@ -76,6 +76,7 @@ class ADS1115(Device):
         except:
             super(ADS1115, self).__init__(label, address)
         self.streaming = multiprocessing.Value('i', 0)
+        self.busnum = 1
         self.record_time = 0.0
         self.f_sample = 2.0
         self.T_sample = 1 / self.f_sample
@@ -142,7 +143,7 @@ class ADS1115(Device):
         return '-'.join(['ads1115',str(label)])
 
     def _get_device_address(self, address_str):
-        return int(address_str)
+        return int(address_str, 16)
 
     def _set_data_paths(self, timestamp_label):
         _data_extension = 'csv'
@@ -193,11 +194,7 @@ class ADS1115(Device):
         _reps = 0               # Gimme some more reps.
         while 1<2:
             _value = 0
-#            try:
             _value = self.channel.read_adc(sub_channel, gain=self.option['gain'])
-#            except:
-#                # TODO
-#                return False
             if _value == _prev_value:
                 time.sleep(self.T_sample)
                 _reps += 1
@@ -210,16 +207,23 @@ class ADS1115(Device):
         # TODO: build out Channel/SubChannel ADTs.
         self._sub_channels = []             # Clear sub-channels first.
         for sub_channel in range(4):
-            if self._test_sub_channel(sub_channel):
-                self._sub_channels.append(sub_channel)
+            try:
+                if self._test_sub_channel(sub_channel):
+                    self._sub_channels.append(sub_channel)
+            except IOError:
+                print('nope')
+                continue
+            except:
+                print('some other jazz')
 
     # state machine apendages.
     def _link_comms(self):
         """
         thread to build a bridge  ) 0 o .with a camera.
         """
+        print(str(self.address)+' of type '+str(type(self.address)))
         # Attempt to connect to main channel.
-        self.channel = Adafruit_ADS1x15.ADS1115(address=self.address)
+        self.channel = Adafruit_ADS1x15.ADS1115(address=self.address, busnum=self.busnum)
         if self.channel:
             # Find available ADC channels.
             self._find_sub_channels()
@@ -244,7 +248,7 @@ class ADS1115(Device):
 #    def _test_connection(self):
 #        """
 #        Check yer I2C port.
-#        :out: available (Bool) is device ready for communication?
+#)        :out: available (Bool) is device ready for communication?)
 #        """
 #        # TODO: make fully funky.
 #        for sub_channel in self._sub_channels:
@@ -264,10 +268,10 @@ class ADS1115(Device):
         for sub_channel in self._sub_channels:
 #            try:
             _data_line = self.channel.read_adc(sub_channel, gain=self.option['gain'])
-            _data_train.append(_data_line)
+            _data_train.append(str(_data_line))
 #            except:
 #                pass
-        return ', '.join(_data_train)
+        return ', '.join(_data_train)+'\n'
 
 
     def _stream_data(self):
