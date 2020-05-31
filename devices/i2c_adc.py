@@ -156,14 +156,16 @@ class ADS1115(Device):
         """
         Chat up the device to find where it lives as well
           as how to get into its front door.
-        :in: old_info {dict} - any old metadata 'bout the device.
+        :in: new_info {dict} - any old metadata 'bout the device.
         :out: info {dict}
         """
-        try:
-            super()._fill_info()
-        except:
-            super(ADS1115, self)._fill_info()
-        self.info.update({'class': 'adc'})
+        self.info = {
+                'address': str(self.address),
+                'id': str(self.id),
+                'options': self.option,
+                'stream_duration': self.current_time - self.start_time,
+                'version': 0.9
+            }
 
     def _set_up_daemon(self):
         _initial_state = 'SLEEPING'
@@ -182,6 +184,7 @@ class ADS1115(Device):
     def _set_record_time(self, duration):
         _duration = float(duration)
         self.record_time = _duration
+        self.info['record_duration'] = _duration    # << TODO : make less dum.
         self._set_timer('recording', _duration)
 
     def _test_sub_channel(self, sub_channel):
@@ -211,17 +214,16 @@ class ADS1115(Device):
                 if self._test_sub_channel(sub_channel):
                     self._sub_channels.append(sub_channel)
             except IOError:
-                print('nope')
+                self.printf('Address invalid!')
                 continue
             except:
-                print('some other jazz')
+                self.printf('Unknown error')
 
     # state machine apendages.
     def _link_comms(self):
         """
         thread to build a bridge  ) 0 o .with a camera.
         """
-        print(str(self.address)+' of type '+str(type(self.address)))
         # Attempt to connect to main channel.
         self.channel = Adafruit_ADS1x15.ADS1115(address=self.address, busnum=self.busnum)
         if self.channel:
@@ -276,14 +278,14 @@ class ADS1115(Device):
 
     def _stream_data(self):
         self._set_file_paths()      # metadata, data
+        self.start_time = self.current_time
         self.streaming.value = 1
         while self.streaming.value > 0:
-#            try:
-            _data_line = self._get_data()
-            self.printf(_data_line)
-            self._broadcast(_data_line)
-#            except:
-#                break
+            try:
+                _data_line = self._get_data()
+                self._broadcast(_data_line)
+            except:
+                break
 
     
     # ESMachine redefinements/additions.
@@ -309,9 +311,13 @@ class ADS1115(Device):
                 self._start_timer('recording')
             self._start_thread(self._stream_data, 'STREAMER')
         elif this_event == 'RECORDING_TIMEOUT_EVENT' or this_event == 'STOP_RECORDING_REQUEST_EVENT':
+
             self.generate_metadata()
             self.option['record'] = False      # TODO : verify that this changes in writer thread.
+            self.printf('Streaming complete')
+            self._next_state = 'STANDING_BY'
         elif this_event == 'STREAMING_TIMEOUT_EVENT' or this_event == 'STOP_STREAMING_REQUEST_EVENT':
+            self.generate_metadata()
             self.streaming.value = 0
             self.printf('Streaming complete')
             self._next_state = 'STANDING_BY'
@@ -367,15 +373,18 @@ def test_adc():
         # Wait for timeouts. << TODO : make more responsive.
         for nerd in adcs:
             nerd._wait_for_('STANDING_BY')
-        for nerd in adcs:
-            # Make sure that all devices are properly hooked up.
-            if not nerd.is_connected:
-                adcs.remove(nerd)
-        for nerd in adcs:
-            nerd.start_recording()
-        time.sleep(_DEFAULT_RECORD_TIME)
-        for nerd in adcs:
-            nerd.stop_recording()
+#        for nerd in adcs:
+#            # Make sure that all devices are properly hooked up.
+#            if not nerd.is_connected:
+#                adcs.remove(nerd)
+        while(1<2):
+            for nerd in adcs:
+                nerd.start_recording()
+            time.sleep(_DEFAULT_RECORD_TIME)
+            for nerd in adcs:
+                nerd.stop_recording()
+            for nerd in adcs:
+                nerd._wait_for_('STANDING_BY')
     except KeyboardInterrupt:
         print('kraww.    ) 0 o .')
         sys.exit()

@@ -72,22 +72,6 @@ class Device(ESMachine):
         except:
             return 'device'
     
-    def _check_wrist(self, time_format='utc'):
-        """
-        Thanks Jon.  (;
-        :in: time_format (str) ['utc','epoch']
-        :out: timestamp (str)
-        """
-        if time_format == 'utc' or time_format == 'label':
-            return datetime.datetime.utcnow().strftime("%Y%m%d-%H%M%S")
-        elif time_format == 'epoch' or time_format == 'timestamp':
-            td = datetime.datetime.utcnow() - _EPOCH
-            return str(td.total_seconds())
-        else:
-            # NOTE: Failure to specify an appropriate time_format will cost
-            #         you one layer of recursion! YOU HAVE BEEN WARNED.  ) 0 o .
-            return self._check_wrist(time_format='epoch')
-
     def _set_option(self, key, value):
         # set options that are output as metadata and may affect function.
         self.option[key] = value
@@ -249,7 +233,7 @@ class Device(ESMachine):
         """
         Chat up the device to find where it lives as well
           as how to get into its front door.
-        :in: old_info {dict} - any old metadata 'bout the device.
+        :in: new_info {dict} - any old metadata 'bout the device.
         """
         self.info = {
                 'address': str(self.address),

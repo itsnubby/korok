@@ -41,7 +41,7 @@ class NonBlockingThread(Thread):
 
 ## timer class.     TODO : move outta here.
 _EPOCH = datetime.datetime(1970,1,1)
-def _get_time_now(time_format='utc'):
+def _check_wrist(time_format='utc'):
     """
     Thanks Jon.  (;
     :in: time_format (str) ['utc','epoch']
@@ -51,11 +51,11 @@ def _get_time_now(time_format='utc'):
         return datetime.datetime.utcnow().strftime("%Y%m%d-%H%M%S")
     elif time_format == 'epoch' or time_format == 'timestamp':
         td = datetime.datetime.utcnow() - _EPOCH
-        return str(td.total_seconds())
+        return float(td.total_seconds())
     else:
         # NOTE: Failure to specify an appropriate time_format will cost
         #         you one layer of recursion! YOU HAVE BEEN WARNED.  ) 0 o .
-        return _get_time_now(time_format='epoch')
+        return _check_wrist(time_format='epoch')
 
 
 class Timer(object):
@@ -80,6 +80,7 @@ class Timer(object):
         :in: kwargs {*}
         :out: thread (Thread)
         """
+        print('Starting thread, '+str(name))
         thread = threading.Thread(target=target, name=name, args=args, kwargs=kwargs)
         thread.daemon = True
         thread.start()
@@ -106,23 +107,29 @@ class Timer(object):
         self._decimate.value = 1
 
     def reset(self):
+        self.kill()
+        for _thread in self._active_threads:
+            while _thread.isAlive():
+                time.sleep(0.1)
+                print('Waiting for thread, '+str(_thread.name))
         self.__init__(self.duration)
 
     def _countdown(self):
-        _start_time = float(_get_time_now('epoch'))
+        _start_time = _check_wrist('epoch')
         self._start_time = _start_time
         while not self._decimate.value > 0:
             if self.active.value > 0:
-                _current_time = float(_get_time_now('epoch'))
+                _current_time = _check_wrist('epoch')
                 _time_elapsed = _current_time - _start_time
                 if _time_elapsed >= self.duration:
                     self.expired.value = 1
                     break
             else:
-                _start_time = float(_get_time_now('epoch')) # need to re-adjust start time when paused.
+                _start_time = _check_wrist('epoch') # need to re-adjust start time when paused.
                 time.sleep(0.3)
         self.active.value = 0
-        self._end_time = float(_get_time_now('epoch'))
+        self._end_time = _check_wrist('epoch')
+        print('Timer thread ended')
 
     def is_expired(self):
         if self.expired.value > 0:
@@ -149,7 +156,7 @@ class StateMachine(object):
         return self.label
 
     def printf(self, prompt, flag=''):
-        say(str(self)+' : '+prompt)
+        say(str(self)+' : '+prompt, flag)
 
     ## helper functions.
     # process and thread management.
@@ -161,6 +168,7 @@ class StateMachine(object):
         :in: kwargs {*}
         :out: process (Process)
         """
+        print('Starting process, '+str(name))
         process = multiprocessing.Process(target=target, args=args, kwargs=kwargs)
         process.daemon = True
         process.start()
@@ -177,6 +185,7 @@ class StateMachine(object):
         :in: kwargs {*}
         :out: thread (Thread)
         """
+        print('Starting thread, '+str(name))
         thread = threading.Thread(target=target, name=name, args=args, kwargs=kwargs)
         thread.daemon = True
         thread.start()
@@ -193,6 +202,7 @@ class StateMachine(object):
         process.join()
         if not process.is_alive():
             self._active_processes.remove(process)
+            print('Ending process, '+str(process.name))
 
     def _kill_processes(self):
         """
@@ -213,11 +223,12 @@ class StateMachine(object):
         _timeout = 15   # <-- Set thread termination timeout (s) here.
         _attempts = 2   # <-- Set number of attempts here.
         for attempt in range(1,_attempts+1):
-            say(' '.join(['Attempt #',str(attempt),': waiting for',thread.name,'to terminate']))
+            self.printf(' '.join(['Attempt #',str(attempt),': waiting for',thread.name,'to terminate']))
             thread.join()
             if not thread.isAlive():
-                say(' '.join([thread.name,'terminated']), 'success')
+                self.printf(' '.join([thread.name,'terminated']), 'success')
                 self._active_threads.remove(thread)
+                print('Ending thread, '+str(process.name))
                 return True
         return False
 
@@ -237,6 +248,7 @@ class StateMachine(object):
         """
         for thread in self._active_threads:
             if not thread.isAlive():
+                self.printf('Removing thread, '+thread.name)
                 self._active_threads.remove(thread)
 
     def _remove_old_processes(self):
@@ -292,6 +304,7 @@ class ESMachine(StateMachine):
         except:
             super(ESMachine, self).__init__(label)
         # event inits.
+        self.current_time = 0.0     # time in Epoch secs.
         self.events = {}
         self._set_up_events()
         self.event_queue = PriorityEventQueue()
@@ -308,12 +321,28 @@ class ESMachine(StateMachine):
         self._set_up_requests()
         self._incoming_requests = PriorityQueue()
 
+    def _check_wrist(self, time_format='utc'):
+        # TODO : update current time.
+        """
+        :in: time_format (str) ['utc','epoch']
+        :out: timestamp (str)
+        """
+        if time_format == 'utc' or time_format == 'label':
+            return datetime.datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+        elif time_format == 'epoch' or time_format == 'timestamp':
+            td = datetime.datetime.utcnow() - _EPOCH
+            return float(td.total_seconds())
+        else:
+            # NOTE: Failure to specify an appropriate time_format will cost
+            #         you one layer of recursion! YOU HAVE BEEN WARNED.  ) 0 o .
+            return _check_wrist(time_format='epoch')
+
+
     # to be redefined.
     def _set_up_events(self):
         # REDEFINE : this is where you _add_event(s)
         self._add_event('NO_EVENT', 0)
         self._add_event('INIT_EVENT', 2)
-        pass
 
     def _set_up_timers(self):
         # REDEFINE : this is where you _add_timer(s)
@@ -371,6 +400,7 @@ class ESMachine(StateMachine):
     def _reset_timers(self):
         for timer_name in self._active_timer_names:
             self.timers[timer_name]['timer'].reset()
+            self._active_timer_names.remove(timer_name)
 
     def _clear_interrupts(self):
         while not self._incoming_interrupts.empty():
@@ -432,6 +462,7 @@ class ESMachine(StateMachine):
         self._remove_old_processes()
         if self.state != self._next_state and self._next_state in self.available_states:
             self.migrate_state()
+        self.current_time = self._check_wrist('epoch')
 
     def _run(self):
         self.printf('Starting up'+str(self))
