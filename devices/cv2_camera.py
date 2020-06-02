@@ -2,10 +2,10 @@
 cv2_camera.py - Python API for USB cameras.
 sableye - sensor interface
 Public:
-    * USB_Camera(Sensor)
+    * CV2_Camera(Sensor)
     * find_cv2_cameras()
 modified : 5/26/2020
-  ) 0 o .
+     ) 0 o .
 """
 import cv2, glob, time, os, datetime, multiprocessing
 try:
@@ -29,31 +29,30 @@ _RESOLUTIONS = {
             }
 
 
-## module definitions.
+## module definitions. [TODO : make part of interface class]
+def find_cv2_addresses():
+    cv2_addresses = range(0,8,1)
+    for address in cv2_addresses:
+        channel = cv2.VideoCapture(address)
+        if not channel is None and channel.isOpened():
+            cv2_addresses.append(address)
+        channel.release()
+        cv2.destroyAllWindows()
+    return cv2_addresses
+
 def find_cv2_cameras():
     """
     Hunt down and return any USB cameras.
-    :out: cv2_cameras [USB_Camera]
+    :out: cv2_cameras [CV2_Camera]
     """
-    # TODO
     cv2_cameras = []
-    camera_addresses = []
-    location = '/dev/video*'
-    video_ports = glob.glob(location)
-    for cv_index in range(0,8,1):
-        channel = cv2.VideoCapture(cv_index)
-        if not channel is None and channel.isOpened():
-            camera_addresses.append(cv_index)
-        channel.release()
-        cv2.destroyAllWindows()
-
+    cv2_addresses = find_cv2_addresses
     for unique_id, address in enumerate(camera_addresses):
-        print('Adding camera index '+str(address))
-        cv2_cameras.append(USB_Camera(str(unique_id), address))
+        cv2_cameras.append(CV2_Camera(str(unique_id), address))
     return cv2_cameras
 
 
-class USB_Camera(Device):
+class CV2_Camera(Device):
     """
     Device class for USB-/OpenCV-enabled cameras.
     """
@@ -62,7 +61,7 @@ class USB_Camera(Device):
         try:
             super().__init__(label, address)
         except:
-            super(USB_Camera, self).__init__(label, address)
+            super(CV2_Camera, self).__init__(label, address)
         self.streaming = multiprocessing.Value('i', 0)
         self.record_time = 0.0      # records indefinitely if record_time <= 0.0.
         self.channel = None
@@ -154,7 +153,7 @@ class USB_Camera(Device):
         try:
             super()._fill_info()
         except:
-            super(USB_Camera, self)._fill_info()
+            super(CV2_Camera, self)._fill_info()
         _cv2_camera_info = {
                 'class': 'cv2-camera',
                 'resolution': {
@@ -201,15 +200,13 @@ class USB_Camera(Device):
             self.connected.value = 0
 
     def _test_comms(self):
-        # test communications with device.
+        # test communications with device; DAEMON.
         if self.connected.value > 0:
             if self.state == 'CONNECTING':
                 self._post_event('CONNECTED_EVENT')
-            self.printf(str(self)+' currently connected')
         elif self.connected.value == 0:
             if self.state == 'DISCONNECTING':
                 self._post_event('DISCONNECTED_EVENT')
-            self.printf(str(self)+' currently disconnected')
 
     
     # FEATURES af.
@@ -256,13 +253,13 @@ class USB_Camera(Device):
         timestamp_label = self._check_wrist('label')
         self._set_metadata_path(timestamp_label)
         self._set_video_path(timestamp_label)
-        self.streaming.value = 1   # set streaming to 'on'.
         out = cv2.VideoWriter(self._video_path, self._fourcc, self._f_frames, (int(w), int(h)))
         while self.streaming.value > 0:
             timestamp = self._check_wrist('timestamp')
             try:
                 ret, frame = self.channel.read()
                 if ret:
+                    # TODO : build service out.
     #                cv2.imshow('-'.join([
     #                    'preview',
     #                    str(self)]), frame)
@@ -302,12 +299,13 @@ class USB_Camera(Device):
         From device to file.
         """
         if this_event == 'INIT_EVENT':
+            self.streaming.value = 1    # set streaming to 'on'.
             self.printf('Recording : '+str(self.channel)+' for '+str(self.record_time))
             if self.record_time > 0.0:     # if timer unset, stream indefinitely.
                 self._start_timer('recording')
             self._start_thread(self._record_video, 'RECORDER')
         elif this_event == 'RECORDING_TIMEOUT_EVENT' or this_event == 'STOP_RECORDING_REQUEST_EVENT':
-            self.streaming.value = 0
+            self.streaming.value = 0    # set streaming to 'off'
             self.printf('Recording complete')
             self.generate_metadata()
             self._next_state = 'STANDING_BY'
@@ -315,13 +313,11 @@ class USB_Camera(Device):
             time.sleep(0.3)
 
     def _idle(self, this_event):
-        print(this_event)
         if this_event == 'INIT_EVENT':
             self.printf('Standing by')
         elif this_event == 'START_RECORDING_REQUEST_EVENT':
             self._next_state = 'RECORDING'
         elif this_event == 'TAKE_PICTURE_REQUEST_EVENT':
-            print('hi nubbb')
             self._next_state = 'TAKING_PICTURE'
         elif this_event == 'DISCONNECT_REQUEST_EVENT':
             self._next_state = 'DISCONNECTING'

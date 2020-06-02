@@ -27,7 +27,7 @@ _DEFAULT_ADC_GAIN = 1
 _DEFAULT_ADC_DATA_RATE = 128
 
 
-## Module-definitions.
+## local definitions.
 def find_i2c_addresses():
     """
     Hunt down and return any connected ADCs.
@@ -60,11 +60,20 @@ def find_i2c_addresses():
             for index in range(1,len(_i2c_fields)):
                 address = _i2c_fields[index]
                 if _regex.match(address):
-                    print('Found the I2C device at '+address)
                     address = str(address)
                     i2c_addresses.append(address)
     return i2c_addresses
 
+
+## Module-definitions.
+def find_i2c_devices():
+    i2c_devices = []
+    i2c_addresses = find_i2c_addresses()
+    for index, address in enumerate(i2c_addresses):
+        # TODO : make tests for each device type and a bigger interface class.
+        newDevice = ADS1115(str(index), address)
+        i2c_devices.append(newDevice)
+    return i2c_devices
 
 class ADS1115(Device):
     """
@@ -75,7 +84,7 @@ class ADS1115(Device):
             super().__init__(label, address)
         except:
             super(ADS1115, self).__init__(label, address)
-        self.streaming = multiprocessing.Value('i', 0)
+        self.streaming = multiprocessing.Value('i', 0)      # TODO : switch to flag.
         self.busnum = 1
         self.record_time = 0.0
         self.f_sample = 2.0

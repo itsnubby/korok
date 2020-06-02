@@ -1,6 +1,6 @@
 """
 control.py - I WILL BE IN CONTROLOLOL!
-modified : 5/22/2020
+modified : 6/1/2020
      ) 0 o .
 """
 import threading, multiprocessing, copy, datetime
@@ -303,6 +303,8 @@ class ESMachine(StateMachine):
             super().__init__(label)
         except:
             super(ESMachine, self).__init__(label)
+        # shared space.
+        self.flags = {}     # {flag_name: mp.Value}
         # event inits.
         self.current_time = 0.0     # time in Epoch secs.
         self.events = {}
@@ -395,6 +397,22 @@ class ESMachine(StateMachine):
     # interrupts.
     def _add_interrupts(self):
         pass
+    
+    # flags.
+    def add_flag(self, name):
+        if not name in self.flags.keys():
+            self.flags[name] = multiprocessing.Value('i',0)   
+        
+    def set_flag(name, value):
+        # value: Boolean
+        if not value:
+            value = 0
+        else:
+            value = 1
+        try:
+            self.flags[name] = value
+        except:
+            self.printf('Could not set flag, '+str(flag)+' to '+str(value))
 
     # resetters.
     def _reset_timers(self):
