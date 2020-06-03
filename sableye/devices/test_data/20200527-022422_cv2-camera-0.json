@@ -1,0 +1,19 @@
+{
+    "address": "0",
+    "class": "cv2-camera",
+    "frame_rate": "10.0",
+    "id": "cv2-camera-0",
+    "resolution": {
+        "height": "720",
+        "width": "1280"
+    }
+}{
+    "address": "0",
+    "class": "cv2-camera",
+    "frame_rate": "10.0",
+    "id": "cv2-camera-0",
+    "resolution": {
+        "height": "720",
+        "width": "1280"
+    }
+}
